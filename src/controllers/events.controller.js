@@ -3,6 +3,7 @@
 // Main URL: http://localhost:5000/api/events/upcoming
 
 import { getCollection } from "../config/db.js";
+import { validateEventInput } from "../utils/validateEvent.js";
 
 // http://localhost:5000/api/events/upcoming?limit=6
 export const GetUpcomingEventsController = async (req, res) => {
