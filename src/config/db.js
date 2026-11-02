@@ -24,6 +24,8 @@ export const connectDB = async () => {
     console.log("MongoDB connected successfully");
   } catch (error) {
     await client.close();
+
+    // Cleanup
     client = null;
     db = null;
     throw error;
@@ -36,10 +38,4 @@ export const getCollection = (name) => {
   }
 
   return db.collection(name);
-};
-
-export const closeDB = async () => {
-  if (client) {
-    await client.close();
-  }
 };

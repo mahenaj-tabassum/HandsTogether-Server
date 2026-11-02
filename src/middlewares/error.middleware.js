@@ -2,7 +2,7 @@
 export const notFound = (req, res) => {
   res.status(404).json({
     success: false,
-    message: `Route not found: ${req.method} ${req.originalUrl}`,
+    message: `Route not found: method:${req.method} api-endpoint:${req.originalUrl}`,
   });
 };
 

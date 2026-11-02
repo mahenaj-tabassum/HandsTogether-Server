@@ -1,17 +1,24 @@
+import "dotenv/config";
 import { createRemoteJWKSet, jwtVerify } from "jose";
-import "dotenv/config"
 
-const AUTH_URL = process.env.CLIENT_URL;
+const AUTH_URL = process.env.AUTH_URL;
+
+// Create a JWKS resolver to retrieve public keys from the Better Auth JWKS endpoint.
+// These public keys are used to verify JWT signatures.
 const JWKS = createRemoteJWKSet(new URL(`${AUTH_URL}/api/auth/jwks`));
+
+// Middleware to authenticate incoming requests
 export const verifyJWT = async (req, res, next) => {
   const header = req.headers.authorization;
 
-  // Header must look like "Bearer <toke>"
+  // Check whether the header contains a Bearer token
   if (!header?.startsWith("Bearer ")) {
     return res
       .status(401)
       .json({ success: false, message: "Authentication required" });
   }
+
+  // Extract the JWT token
   const token = header.split(" ")[1];
   try {
     // Verify signature, expiry, issuer and audience
@@ -20,7 +27,8 @@ export const verifyJWT = async (req, res, next) => {
       audience: AUTH_URL,
     });
 
-    // Keep only what we need on the request
+    // Attach verified user information to the request
+    // so that subsequent routes can access it through req.user
     req.user = {
       id: payload.id ?? payload.sub,
       email: payload.email,
