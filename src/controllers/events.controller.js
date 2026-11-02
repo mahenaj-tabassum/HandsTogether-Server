@@ -181,3 +181,33 @@ export const GetJoinStatusController = async (req, res) => {
   );
   res.json({ success: true, joined: count > 0 });
 };
+
+// GET /api/events/joined  ->  every event the logged-in user joined (past and upcoming)
+export const GetJoinedEventsController = async (req, res) => {
+  const joins = await getCollection("joins")
+  .find({ userEmail: req.user.email })
+  .toArray();
+
+  if (joins.length === 0) {
+  return res.json({ success: true, count: 0, events: [] });
+  }
+
+  const joinedAtById = new Map(
+  joins.map((j) => [j.eventId.toString(), j.joinedAt]),
+  );
+
+  const events = await getCollection("events")
+  .find({ _id: { $in: joins.map((j) => j.eventId) } })
+  .project({ createdBy: 0 })
+  .sort({ eventDate: 1 })
+  .toArray();
+
+  res.json({
+  success: true,
+  count: events.length,
+  events: events.map((e) => ({
+    ...e,
+    joinedAt: joinedAtById.get(e._id.toString()),
+  })),
+  });
+};
