@@ -166,3 +166,18 @@ export const JoinEventController = async (req, res) => {
     capacity: updated.capacity,
   });
 };
+
+// GET /api/events/:id/join  ->  { joined: true | false }  (so the button can say "Joined")
+export const GetJoinStatusController = async (req, res) => {
+  const { id } = req.params;
+  if (!OBJECT_ID_PATTERN.test(id)) {
+    return res
+      .status(400)
+      .json({ success: false, message: "Invalid event id." });
+  }
+  const count = await getCollection("joins").countDocuments(
+    { eventId: new ObjectId(id), userEmail: req.user.email },
+    { limit: 1 },
+  );
+  res.json({ success: true, joined: count > 0 });
+};
