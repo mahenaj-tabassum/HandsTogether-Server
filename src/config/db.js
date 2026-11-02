@@ -21,6 +21,9 @@ export const connectDB = async () => {
     // Create an index for event date queries
     await db.collection("events").createIndex({ eventDate: 1 });
 
+    await db
+      .collection("joins")
+      .createIndex({ eventId: 1, userEmail: 1 }, { unique: true });
     console.log("MongoDB connected successfully");
   } catch (error) {
     await client.close();

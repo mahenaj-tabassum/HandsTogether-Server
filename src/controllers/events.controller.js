@@ -6,13 +6,15 @@ import { ObjectId } from "mongodb";
 
 const OBJECT_ID_PATTERN = /^[a-f\d]{24}$/i;
 
-// GET /api/events?limit=6&type=Donation&q=winter
 // All three are optional. Returns only upcoming events, soonest first.
+// GET: /api/events
+// GET: /api/events?limit=6&type=Donation&q=winter
 export const GetUpcomingEventsController = async (req, res) => {
   const requested = Number.parseInt(req.query.limit, 10);
   const limit =
     Number.isInteger(requested) && requested > 0 ? Math.min(requested, 50) : 0;
 
+  // Todays date
   const startOfToday = new Date();
   startOfToday.setUTCHours(0, 0, 0, 0);
   const filter = { eventDate: { $gte: startOfToday } };
@@ -37,57 +39,60 @@ export const GetUpcomingEventsController = async (req, res) => {
   res.json({ success: true, count: events.length, events });
 };
 
-// POST /api/events  (login required)
+// POST: /api/events  (login required)
 export const CreateEventController = async (req, res) => {
   const { errors, values } = validateEventInput(req.body);
 
   if (errors) {
     return res.status(400).json({
       success: false,
-      message: "Please fix the highlighted fields.",
+      message: "Please fix the highlighted fields",
       errors,
     });
   }
 
-  const doc = {
+  // Create MongoDB document
+  const data = {
     ...values,
     joinedCount: 0, // nobody has joined yet
     createdBy: req.user.email,
     createdAt: new Date(),
   };
 
-  const result = await getCollection("events").insertOne(doc);
+  // Saving the document in MongoDB
+  const result = await getCollection("events").insertOne(data);
 
-  // Do not send the creator's email back in the response.
-  const { createdBy, ...event } = doc;
+  // Don't send the creator's email back in the response
+  const { createdBy, ...eventData } = data;
+
   res.status(201).json({
     success: true,
-    event: { _id: result.insertedId, ...event },
+    event: { _id: result.insertedId, ...eventData },
   });
 };
 
-// GET /api/events/:id
+// GET: /api/events/:id
 export const GetEventByIdController = async (req, res) => {
   const { id } = req.params;
 
-  // 24 hex characters is the real shape of a MongoDB _id.
-  // We avoid ObjectId.isValid() because it also accepts any 12-character string.
   if (!OBJECT_ID_PATTERN.test(id)) {
     return res
       .status(400)
       .json({ success: false, message: "Invalid event id." });
   }
 
-  const event = await getCollection("events").findOne(
+  const data = await getCollection("events").findOne(
     { _id: new ObjectId(id) },
-    { projection: { createdBy: 0 } }, // never expose the creator's email
+    { projection: { createdBy: 0 } },
   );
-  if (!event) {
+
+  if (!data) {
     return res
       .status(404)
       .json({ success: false, message: "Event not found." });
   }
-  res.json({ success: true, event });
+
+  res.json({ success: true, data });
 };
 
 // POST /api/events/:id/join  (login required)
@@ -99,12 +104,13 @@ export const JoinEventController = async (req, res) => {
       .json({ success: false, message: "Invalid event id." });
   }
   const eventId = new ObjectId(id);
-  const events = getCollection("events");
-  const joins = getCollection("joins");
 
-  const event = await events.findOne(
+  const eventsCollection = getCollection("events");
+  const joinsCollection = getCollection("joins");
+
+  const event = await eventsCollection.findOne(
     { _id: eventId },
-    { projection: { eventDate: 1 } },
+    { projection: { eventDate: 1 } }, // returns only eventDate
   );
   if (!event) {
     return res
@@ -114,6 +120,7 @@ export const JoinEventController = async (req, res) => {
 
   const startOfToday = new Date();
   startOfToday.setUTCHours(0, 0, 0, 0);
+
   if (event.eventDate < startOfToday) {
     return res
       .status(400)
@@ -122,7 +129,7 @@ export const JoinEventController = async (req, res) => {
 
   // 1) Record the join. The unique index rejects a second join by the same user.
   try {
-    await joins.insertOne({
+    await joinsCollection.insertOne({
       eventId,
       userEmail: req.user.email,
       joinedAt: new Date(),
@@ -140,20 +147,28 @@ export const JoinEventController = async (req, res) => {
   //    racing for the last seat cannot both win: MongoDB applies the updates one at a time.
   let updated;
   try {
-    updated = await events.findOneAndUpdate(
-      { _id: eventId, $expr: { $lt: ["$joinedCount", "$capacity"] } },
+    updated = await eventsCollection.findOneAndUpdate(
+      // Find teh event with is ID, but only if the number of people who have joined is less than the event's total capacity
+      {
+        _id: eventId,
+        $expr: {
+          $lt: ["$joinedCount", "$capacity"],
+        },
+      },
+
       { $inc: { joinedCount: 1 } },
+
       { returnDocument: "after", projection: { joinedCount: 1, capacity: 1 } },
     );
   } catch (error) {
     // Undo step 1, then report the failure.
-    await joins.deleteOne({ eventId, userEmail: req.user.email });
+    await joinsCollection.deleteOne({ eventId, userEmail: req.user.email });
     throw error;
   }
 
   // 3) No seat left: undo step 1.
   if (!updated) {
-    await joins.deleteOne({ eventId, userEmail: req.user.email });
+    await joinsCollection.deleteOne({ eventId, userEmail: req.user.email });
     return res
       .status(409)
       .json({ success: false, message: "This event is full." });
@@ -167,7 +182,9 @@ export const JoinEventController = async (req, res) => {
   });
 };
 
-// GET /api/events/:id/join  ->  { joined: true | false }  (so the button can say "Joined")
+// GET /api/events/:id/join
+// Checks whether the logged-in user has already joined the event.
+// Returns { joined: true | false } so the frontend knows whether the current user has already joined this event.
 export const GetJoinStatusController = async (req, res) => {
   const { id } = req.params;
   if (!OBJECT_ID_PATTERN.test(id)) {
@@ -175,8 +192,13 @@ export const GetJoinStatusController = async (req, res) => {
       .status(400)
       .json({ success: false, message: "Invalid event id." });
   }
+
+  // Retrieve join count from database
   const count = await getCollection("joins").countDocuments(
-    { eventId: new ObjectId(id), userEmail: req.user.email },
+    {
+      eventId: new ObjectId(id),
+      userEmail: req.user.email,
+    },
     { limit: 1 },
   );
   res.json({ success: true, joined: count > 0 });
@@ -193,11 +215,16 @@ export const GetJoinedEventsController = async (req, res) => {
   }
 
   const joinedAtById = new Map(
-    joins.map((j) => [j.eventId.toString(), j.joinedAt]),
+    joins.map((joinedDocument) => [
+      joinedDocument.eventId.toString(),
+      joinedDocument.joinedAt,
+    ]),
   );
 
   const events = await getCollection("events")
-    .find({ _id: { $in: joins.map((j) => j.eventId) } })
+    .find({
+      _id: { $in: joins.map((joinedDocument) => joinedDocument.eventId) },
+    })
     .project({ createdBy: 0 })
     .sort({ eventDate: 1 })
     .toArray();
@@ -205,9 +232,9 @@ export const GetJoinedEventsController = async (req, res) => {
   res.json({
     success: true,
     count: events.length,
-    events: events.map((e) => ({
-      ...e,
-      joinedAt: joinedAtById.get(e._id.toString()),
+    events: events.map((event) => ({
+      ...event,
+      joinedAt: joinedAtById.get(event._id.toString()),
     })),
   });
 };
@@ -232,9 +259,9 @@ export const UpdateEventController = async (req, res) => {
       .json({ success: false, message: "Invalid event id." });
   }
   const eventId = new ObjectId(id);
-  const events = getCollection("events");
+  const eventsCollection = getCollection("events");
 
-  const existing = await events.findOne(
+  const existing = await eventsCollection.findOne(
     { _id: eventId },
     { projection: { createdBy: 1, eventDate: 1 } },
   );
@@ -260,7 +287,7 @@ export const UpdateEventController = async (req, res) => {
     });
   }
 
-  const updated = await events.findOneAndUpdate(
+  const updated = await eventsCollection.findOneAndUpdate(
     {
       _id: eventId,
       createdBy: req.user.email,
@@ -271,7 +298,7 @@ export const UpdateEventController = async (req, res) => {
   );
 
   if (!updated) {
-    const latest = await events.findOne(
+    const latest = await eventsCollection.findOne(
       { _id: eventId },
       { projection: { joinedCount: 1 } },
     );
@@ -286,6 +313,7 @@ export const UpdateEventController = async (req, res) => {
 
   res.json({ success: true, event: updated });
 };
+
 // DELETE /api/events/:id  (login required, owner only)
 export const DeleteEventController = async (req, res) => {
   const { id } = req.params;
@@ -295,9 +323,9 @@ export const DeleteEventController = async (req, res) => {
       .json({ success: false, message: "Invalid event id." });
   }
   const eventId = new ObjectId(id);
-  const events = getCollection("events");
+  const eventsCollection = getCollection("events");
 
-  const existing = await events.findOne(
+  const existing = await eventsCollection.findOne(
     { _id: eventId },
     { projection: { createdBy: 1 } },
   );
@@ -313,7 +341,8 @@ export const DeleteEventController = async (req, res) => {
     });
   }
 
-  await events.deleteOne({ _id: eventId, createdBy: req.user.email });
+  await eventsCollection.deleteOne({ _id: eventId, createdBy: req.user.email });
+
   // Remove the join records too, so no orphan rows are left behind.
   await getCollection("joins").deleteMany({ eventId });
 
