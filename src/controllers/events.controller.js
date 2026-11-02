@@ -185,29 +185,137 @@ export const GetJoinStatusController = async (req, res) => {
 // GET /api/events/joined  ->  every event the logged-in user joined (past and upcoming)
 export const GetJoinedEventsController = async (req, res) => {
   const joins = await getCollection("joins")
-  .find({ userEmail: req.user.email })
-  .toArray();
+    .find({ userEmail: req.user.email })
+    .toArray();
 
   if (joins.length === 0) {
-  return res.json({ success: true, count: 0, events: [] });
+    return res.json({ success: true, count: 0, events: [] });
   }
 
   const joinedAtById = new Map(
-  joins.map((j) => [j.eventId.toString(), j.joinedAt]),
+    joins.map((j) => [j.eventId.toString(), j.joinedAt]),
   );
 
   const events = await getCollection("events")
-  .find({ _id: { $in: joins.map((j) => j.eventId) } })
-  .project({ createdBy: 0 })
-  .sort({ eventDate: 1 })
-  .toArray();
+    .find({ _id: { $in: joins.map((j) => j.eventId) } })
+    .project({ createdBy: 0 })
+    .sort({ eventDate: 1 })
+    .toArray();
 
   res.json({
-  success: true,
-  count: events.length,
-  events: events.map((e) => ({
-    ...e,
-    joinedAt: joinedAtById.get(e._id.toString()),
-  })),
+    success: true,
+    count: events.length,
+    events: events.map((e) => ({
+      ...e,
+      joinedAt: joinedAtById.get(e._id.toString()),
+    })),
   });
+};
+
+// GET /api/events/mine  (login required)  ->  events created by the logged-in user
+export const GetMyEventsController = async (req, res) => {
+  const events = await getCollection("events")
+    .find({ createdBy: req.user.email })
+    .project({ createdBy: 0 })
+    .sort({ eventDate: 1 })
+    .toArray();
+
+  res.json({ success: true, count: events.length, events });
+};
+
+// PATCH /api/events/:id  (login required, owner only)
+export const UpdateEventController = async (req, res) => {
+  const { id } = req.params;
+  if (!OBJECT_ID_PATTERN.test(id)) {
+    return res
+      .status(400)
+      .json({ success: false, message: "Invalid event id." });
+  }
+  const eventId = new ObjectId(id);
+  const events = getCollection("events");
+
+  const existing = await events.findOne(
+    { _id: eventId },
+    { projection: { createdBy: 1, eventDate: 1 } },
+  );
+  if (!existing) {
+    return res
+      .status(404)
+      .json({ success: false, message: "Event not found." });
+  }
+  if (existing.createdBy !== req.user.email) {
+    return res.status(403).json({
+      success: false,
+      message: "You can only edit events you created.",
+    });
+  }
+
+  // The old date comes from the database, never from the request.
+  const { errors, values } = validateEventInput(req.body, existing.eventDate);
+  if (errors) {
+    return res.status(400).json({
+      success: false,
+      message: "Please fix the highlighted fields.",
+      errors,
+    });
+  }
+
+  const updated = await events.findOneAndUpdate(
+    {
+      _id: eventId,
+      createdBy: req.user.email,
+      joinedCount: { $lte: values.capacity },
+    },
+    { $set: { ...values, updatedAt: new Date() } },
+    { returnDocument: "after", projection: { createdBy: 0 } },
+  );
+
+  if (!updated) {
+    const latest = await events.findOne(
+      { _id: eventId },
+      { projection: { joinedCount: 1 } },
+    );
+    return res.status(400).json({
+      success: false,
+      message: "Please fix the highlighted fields.",
+      errors: {
+        capacity: `${latest?.joinedCount ?? 0} people already joined, so capacity cannot be lower.`,
+      },
+    });
+  }
+
+  res.json({ success: true, event: updated });
+};
+// DELETE /api/events/:id  (login required, owner only)
+export const DeleteEventController = async (req, res) => {
+  const { id } = req.params;
+  if (!OBJECT_ID_PATTERN.test(id)) {
+    return res
+      .status(400)
+      .json({ success: false, message: "Invalid event id." });
+  }
+  const eventId = new ObjectId(id);
+  const events = getCollection("events");
+
+  const existing = await events.findOne(
+    { _id: eventId },
+    { projection: { createdBy: 1 } },
+  );
+  if (!existing) {
+    return res
+      .status(404)
+      .json({ success: false, message: "Event not found." });
+  }
+  if (existing.createdBy !== req.user.email) {
+    return res.status(403).json({
+      success: false,
+      message: "You can only delete events you created.",
+    });
+  }
+
+  await events.deleteOne({ _id: eventId, createdBy: req.user.email });
+  // Remove the join records too, so no orphan rows are left behind.
+  await getCollection("joins").deleteMany({ eventId });
+
+  res.json({ success: true });
 };
