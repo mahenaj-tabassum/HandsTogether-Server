@@ -8,7 +8,7 @@ import { notFound, errorHandler } from "./middlewares/error.middleware.js";
 const app = express();
 
 // Middleware
-app.use(cors({ origin: process.env.CLIENT_URL }));
+app.use(cors());
 app.use(express.json());
 
 // Root route
