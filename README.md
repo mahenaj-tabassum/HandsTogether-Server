@@ -68,9 +68,13 @@ Create a `.env` file in the project root:
 
 ```env
 PORT=5000
+
 MONGODB_DATABASE_URL=your_mongodb_connection_string
+
 DB_NAME=HandsTogether
+
 CLIENT_URL=http://localhost:3000
+
 AUTH_URL=http://localhost:3000
 ```
 
@@ -110,6 +114,24 @@ Base path: `/api/events`
 GET /api/events?limit=6&type=Donation&q=winter
 ```
 
+### Full API URLs
+
+Base URL: `https://hands-together-server.vercel.app`
+
+| Method | URL                                                            | Auth       |
+| ------ | -------------------------------------------------------------- | ---------- |
+| GET    | `https://hands-together-server.vercel.app/`                    | Public     |
+| GET    | `https://hands-together-server.vercel.app/api/events`          | Public     |
+| GET    | `https://hands-together-server.vercel.app/api/events?limit=6`  | Public     |
+| GET    | `https://hands-together-server.vercel.app/api/events/:id`      | Public     |
+| POST   | `https://hands-together-server.vercel.app/api/events`          | JWT        |
+| PATCH  | `https://hands-together-server.vercel.app/api/events/:id`      | JWT, owner |
+| DELETE | `https://hands-together-server.vercel.app/api/events/:id`      | JWT, owner |
+| POST   | `https://hands-together-server.vercel.app/api/events/:id/join` | JWT        |
+| GET    | `https://hands-together-server.vercel.app/api/events/:id/join` | JWT        |
+| GET    | `https://hands-together-server.vercel.app/api/events/joined`   | JWT        |
+| GET    | `https://hands-together-server.vercel.app/api/events/mine`     | JWT        |
+
 ### Authentication
 
 Protected routes need a Better Auth JWT in the request header:
@@ -119,43 +141,6 @@ Authorization: Bearer <token>
 ```
 
 The server verifies the signature, expiry, issuer and audience, then reads the user's `id`, `email` and `name` from the token.
-
-### Create / Update body
-
-```json
-{
-  "title": "Winter Clothes Distribution",
-  "eventType": "Donation",
-  "eventDate": "2026-12-20",
-  "eventTime": "10:00",
-  "location": "Mirpur 10, Dhaka",
-  "thumbnail": "https://example.com/photo.jpg",
-  "description": "Help us distribute warm clothes to families in need.",
-  "capacity": 50
-}
-```
-
-| Field         | Rule                                             |
-| ------------- | ------------------------------------------------ |
-| `title`       | 3 to 100 characters                              |
-| `eventType`   | One of the allowed event types                   |
-| `eventDate`   | `YYYY-MM-DD`, a real calendar day, in the future |
-| `eventTime`   | `HH:MM`, 24-hour                                 |
-| `location`    | 2 to 120 characters                              |
-| `thumbnail`   | Valid `http` or `https` URL                      |
-| `description` | 20 to 1000 characters                            |
-| `capacity`    | Whole number from 1 to 5000                      |
-
-On update, the capacity cannot be lower than the number of people who already joined.
-
-| Status | Meaning                              |
-| ------ | ------------------------------------ |
-| 400    | Invalid id or validation error       |
-| 401    | Missing, invalid or expired token    |
-| 403    | Not the owner of the event           |
-| 404    | Event or route not found             |
-| 409    | Already joined, or the event is full |
-| 500    | Unexpected server error              |
 
 ## Database
 
